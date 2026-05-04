@@ -1,6 +1,12 @@
 export const API_URL = "http://localhost:3000";
 
-export const ROLES = ["Admin", "Moderator", "Editor", "Viewer"] as const;
+export const ROLES = [
+  "Admin",
+  "Moderator",
+  "Editor",
+  "Viewer",
+  "Support",
+] as const;
 
 export type Role = (typeof ROLES)[number];
 

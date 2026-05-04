@@ -1,34 +1,29 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import "./App.css";
-import { useAppDispatch, useAppSelector } from "./app/hooks";
 import { UserCard } from "./entities/user";
 import {
-  createUser,
-  deleteUserById,
-  editUser as editUserAction,
-  fetchUsers,
-} from "./entities/user/model/slice";
+  useAddUserMutation,
+  useDeleteUserMutation,
+  useGetUsersQuery,
+  useUpdateUserMutation,
+} from "./entities/user/api";
 import { AddUserForm } from "./features/add-user";
 import { DeleteUserModal } from "./features/delete-user";
 import type { UserFormData, UserType } from "./shared/types";
 import { INITIAL_USER_FORM } from "./shared/types";
+import { ErrorGuard } from "./shared/ui/error-guard/error-guard";
 
 function App() {
-  const dispatch = useAppDispatch();
-
-  // 1. Все данные, статус загрузки и ошибки берем ТОЛЬКО из стора
-  const { users, isLoading, error } = useAppSelector((state) => state.user);
+  const { data: users = [], isLoading, error } = useGetUsersQuery();
+  const [createUserApi] = useAddUserMutation();
+  const [updateUserApi] = useUpdateUserMutation();
+  const [deleteUserApi, { error: deleteError }] = useDeleteUserMutation();
 
   // 2. Локальный стейт оставляем только для UI (формы, модалки)
   const [userForm, setUserForm] = useState<UserFormData>(INITIAL_USER_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [isAddFormVisible, setIsAddFormVisible] = useState(false);
   const [userToDelete, setUserToDelete] = useState<UserType | null>(null);
-
-  useEffect(() => {
-    const promise = dispatch(fetchUsers());
-    return () => promise.abort(); // Автоматическая отмена при размонтировании
-  }, [dispatch]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
@@ -46,28 +41,30 @@ function App() {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (editingId) {
-      // Редактирование через Redux
-      await dispatch(editUserAction({ id: editingId, userData: userForm }));
-      setEditingId(null);
-    } else {
-      // Создание через Redux
-      const newUser: UserType = { ...userForm, id: crypto.randomUUID() };
-      await dispatch(createUser(newUser));
+    try {
+      if (editingId) {
+        // Редактирование через ReduxTK
+        await updateUserApi({ id: editingId, userData: userForm }).unwrap();
+        setEditingId(null);
+      } else {
+        // Создание через ReduxTK
+        const newUser: UserType = { ...userForm, id: crypto.randomUUID() };
+        await createUserApi(newUser).unwrap();
+      }
+      setUserForm(INITIAL_USER_FORM);
+      setIsAddFormVisible(false);
+    } catch (error) {
+      console.error("Ошибка при сохранении:", error);
     }
-
-    setUserForm(INITIAL_USER_FORM);
-    setIsAddFormVisible(false);
   };
 
   const onToggleActive = (id: string) => {
-    // Для переключения isActive тоже стоит завести Thunk, если это сохраняется на сервере.
-    // Если это только локально — можно оставить editUserAction с частичными данными.
     const user = users.find((u) => u.id === id);
     if (user) {
-      dispatch(
-        editUserAction({ id, userData: { ...user, isActive: !user.isActive } }),
-      );
+      updateUserApi({
+        id,
+        userData: { ...user, isActive: !user.isActive },
+      }).unwrap();
     }
   };
 
@@ -77,6 +74,21 @@ function App() {
     setUserForm({ ...selectedUser });
     setEditingId(id);
     setIsAddFormVisible(false);
+  };
+
+  const confirmDelete = async () => {
+    if (!userToDelete) return; // Проверяем, что есть кого удалять
+
+    try {
+      // Используем id из объекта в стейте
+      await deleteUserApi(userToDelete.id).unwrap();
+
+      // Если всё ок, закрываем модалку
+      setUserToDelete(null);
+    } catch (error) {
+      // Ошибка попадёт в deleteError (из хука) и в консоль
+      console.error("Ошибка удаления:", error);
+    }
   };
 
   // UI логика модалок и форм
@@ -98,12 +110,6 @@ function App() {
     if (!isLoading) setUserToDelete(null);
   };
 
-  const confirmDelete = async () => {
-    if (!userToDelete) return;
-    await dispatch(deleteUserById(userToDelete.id));
-    setUserToDelete(null);
-  };
-
   // Показываем лоадер только при первой загрузке (если массив пустой)
   if (isLoading && users.length === 0)
     return <div style={{ color: "green" }}>...Loading</div>;
@@ -112,9 +118,8 @@ function App() {
     <div>
       <h2>User Management (Redux Toolkit)</h2>
 
-      {error && (
-        <div style={{ color: "red", marginBottom: "12px" }}>{error}</div>
-      )}
+      <ErrorGuard error={error} />
+      <ErrorGuard error={deleteError} />
 
       <button onClick={showAddForm} className="addUserBtn">
         ➕ Добавить пользователя
